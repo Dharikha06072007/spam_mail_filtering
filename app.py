@@ -1,7 +1,11 @@
 """Flask web application for the Naive Bayes spam filter.
 
-Run with:  python app.py
-Then open the localhost URL printed in the terminal.
+Run locally with:  python app.py   (opens http://127.0.0.1:<PORT>)
+Run on Render with:  gunicorn app:app --bind 0.0.0.0:$PORT
+
+The server binds to 0.0.0.0 (all network interfaces) and uses the PORT
+environment variable, defaulting to 10000, so it works both locally and on
+Render without further configuration.
 
 On startup the application runs the FULL training pipeline exactly once:
   1. load spam.csv
@@ -123,4 +127,5 @@ def predict():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port, debug=False)
