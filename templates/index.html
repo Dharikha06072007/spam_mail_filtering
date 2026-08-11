@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Email Spam Filter</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <div class="container">
+
+    <header class="app-header">
+      <div class="logo">📧</div>
+      <div>
+        <h1>Email Spam Filter</h1>
+        <p class="tagline">Naive Bayes Spam / Ham Classifier</p>
+      </div>
+    </header>
+
+    <!-- Input -->
+    <section class="card">
+      <h2 class="card-title">Enter Email / Message</h2>
+      <p class="muted">Paste an email or message below and click Check Message.</p>
+      <textarea
+        id="message"
+        rows="7"
+        placeholder="Type or paste your email / message here..."
+      ></textarea>
+      <div class="actions">
+        <button id="checkBtn" class="btn btn-primary" type="button">Check Message</button>
+        <button id="clearBtn" class="btn btn-secondary" type="button">Clear</button>
+      </div>
+    </section>
+
+    <!-- Prediction result -->
+    <section id="resultCard" class="card result-card hidden">
+      <div class="result-header">
+        <div>
+          <div id="resultBadge" class="result-badge">—</div>
+          <div id="resultConfidence" class="result-confidence">Confidence: —</div>
+        </div>
+        <div id="resultText" class="result-note"></div>
+      </div>
+
+      <div class="prob-section">
+        <div class="prob-row">
+          <span class="prob-label">Spam Probability</span>
+          <span class="prob-value" id="spamProb">—</span>
+        </div>
+        <div class="bar">
+          <div id="spamBar" class="bar-fill bar-spam" style="width: 0%"></div>
+        </div>
+
+        <div class="prob-row">
+          <span class="prob-label">Ham Probability</span>
+          <span class="prob-value" id="hamProb">—</span>
+        </div>
+        <div class="bar">
+          <div id="hamBar" class="bar-fill bar-ham" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <div class="risk-row">
+        <span class="prob-label">Risk Level</span>
+        <span id="riskBadge" class="risk-badge">—</span>
+      </div>
+
+      <div class="details-box">
+        <div class="details-title">Prediction Details</div>
+        <div class="details-row"><span>Prediction</span><span id="detailPrediction">—</span></div>
+        <div class="details-row"><span>Spam Probability</span><span id="detailSpam">—</span></div>
+        <div class="details-row"><span>Ham Probability</span><span id="detailHam">—</span></div>
+      </div>
+
+      <div id="indicatorsBox" class="indicators hidden"></div>
+
+      <div class="analyzed">
+        <h3>Analyzed Message</h3>
+        <div id="analyzedText" class="analyzed-box"></div>
+      </div>
+    </section>
+
+    <!-- Application statistics -->
+    <section class="card">
+      <h2 class="card-title">Application Prediction Statistics</h2>
+      <p class="muted">Based on the prediction history stored in this browser.</p>
+      <div class="perf-grid">
+        <div class="stat">
+          <div class="stat-value" id="statTotal">0</div>
+          <div class="stat-label">Total Messages Checked</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="statSpam">0</div>
+          <div class="stat-label">Spam Detected</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="statHam">0</div>
+          <div class="stat-label">Ham Detected</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="statAvgSpam">0%</div>
+          <div class="stat-label">Average Spam Probability</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- History -->
+    <section class="card">
+      <div class="history-header">
+        <h2 class="card-title">Prediction History</h2>
+        <button id="clearHistoryBtn" class="btn btn-danger" type="button">Clear History</button>
+      </div>
+      <p id="historyEmpty" class="muted">No predictions yet.</p>
+      <div id="historyWrap" class="history-wrap hidden">
+        <div class="history-scroll">
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Message</th>
+                <th>Result</th>
+                <th>Confidence</th>
+                <th>Risk</th>
+              </tr>
+            </thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      College research project &middot; Naive Bayes based email spam filtering
+    </footer>
+  </div>
+
+  <script>
+    const HISTORY_KEY = 'spamFilterHistory';
+    const HISTORY_LIMIT = 100;
+
+    const messageBox = document.getElementById('message');
+    const checkBtn = document.getElementById('checkBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const resultCard = document.getElementById('resultCard');
+    const resultBadge = document.getElementById('resultBadge');
+    const resultText = document.getElementById('resultText');
+    const spamProb = document.getElementById('spamProb');
+    const hamProb = document.getElementById('hamProb');
+    const spamBar = document.getElementById('spamBar');
+    const hamBar = document.getElementById('hamBar');
+    const riskBadge = document.getElementById('riskBadge');
+    const indicatorsBox = document.getElementById('indicatorsBox');
+    const analyzedText = document.getElementById('analyzedText');
+
+    /* ---------- History helpers (localStorage) ---------- */
+    function loadHistory() {
+      try {
+        const raw = localStorage.getItem(HISTORY_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch (err) {
+        return [];
+      }
+    }
+
+    function saveHistory(history) {
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, HISTORY_LIMIT)));
+      } catch (err) {
+        /* storage full - keep app working */
+      }
+    }
+
+    function truncate(text, max) {
+      return text.length > max ? text.slice(0, max) + '…' : text;
+    }
+
+    function formatTime(ts) {
+      const d = new Date(ts);
+      const pad = (n) => String(n).padStart(2, '0');
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+        ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+
+    function riskLabel(level) {
+      if (level === 'HIGH') return '🔴 HIGH';
+      if (level === 'MEDIUM') return '🟠 MEDIUM';
+      return '🟢 LOW';
+    }
+
+    /* ---------- Statistics ---------- */
+    function renderStats(history) {
+      const total = history.length;
+      const spamCount = history.filter(function (h) { return h.prediction === 'SPAM'; }).length;
+      const hamCount = total - spamCount;
+      const avg = total
+        ? history.reduce(function (sum, h) { return sum + h.spam_probability; }, 0) / total
+        : 0;
+
+      document.getElementById('statTotal').textContent = total;
+      document.getElementById('statSpam').textContent = spamCount;
+      document.getElementById('statHam').textContent = hamCount;
+      document.getElementById('statAvgSpam').textContent = total ? avg.toFixed(1) + '%' : '0%';
+    }
+
+    /* ---------- History table ---------- */
+    function renderHistory(history) {
+      const empty = document.getElementById('historyEmpty');
+      const wrap = document.getElementById('historyWrap');
+      const body = document.getElementById('historyBody');
+
+      if (!history.length) {
+        empty.classList.remove('hidden');
+        wrap.classList.add('hidden');
+        body.innerHTML = '';
+        return;
+      }
+
+      empty.classList.add('hidden');
+      wrap.classList.remove('hidden');
+
+      body.innerHTML = history.map(function (h, index) {
+        const isSpam = h.prediction === 'SPAM';
+        const badgeClass = isSpam ? 'tag tag-spam' : 'tag tag-ham';
+        return '<tr data-index="' + index + '" class="history-row">' +
+          '<td class="time-col">' + formatTime(h.ts) + '</td>' +
+          '<td class="msg-col">' + escapeHtml(truncate(h.message, 70)) +
+          '<div class="history-full hidden">' + escapeHtml(h.message) + '</div></td>' +
+          '<td><span class="' + badgeClass + '">' + h.prediction + '</span></td>' +
+          '<td>' + h.confidence.toFixed(1) + '%</td>' +
+          '<td>' + riskLabel(h.risk_level) + '</td>' +
+          '</tr>';
+      }).join('');
+
+      body.querySelectorAll('.history-row').forEach(function (row) {
+        row.addEventListener('click', function () {
+          const full = row.querySelector('.history-full');
+          if (full) full.classList.toggle('hidden');
+        });
+      });
+    }
+
+    function escapeHtml(text) {
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    /* ---------- Result rendering ---------- */
+    function showError(message) {
+      resultCard.classList.remove('hidden');
+      resultCard.className = 'card result-card error';
+      resultBadge.textContent = '⚠';
+      resultBadge.className = 'result-badge badge-error';
+      resultText.textContent = message;
+      document.getElementById('resultConfidence').textContent = 'Confidence: —';
+      document.getElementById('detailPrediction').textContent = '—';
+      document.getElementById('detailSpam').textContent = '—';
+      document.getElementById('detailHam').textContent = '—';
+      indicatorsBox.classList.add('hidden');
+    }
+
+    function renderResult(data) {
+      const isSpam = data.prediction === 'SPAM';
+
+      resultCard.classList.remove('hidden');
+      resultCard.className = 'card result-card ' + (isSpam ? 'spam' : 'ham');
+
+      resultBadge.textContent = isSpam ? '🚨 SPAM DETECTED' : '✅ HAM / SAFE MESSAGE';
+      resultBadge.className = 'result-badge ' + (isSpam ? 'badge-spam' : 'badge-ham');
+      resultText.textContent = isSpam
+        ? 'The message has a high probability of being classified as spam.'
+        : 'The message appears to be a legitimate message based on the trained model.';
+
+      document.getElementById('resultConfidence').textContent =
+        'Confidence: ' + data.confidence.toFixed(2) + '%';
+
+      spamProb.textContent = data.spam_probability.toFixed(2) + '%';
+      hamProb.textContent = data.ham_probability.toFixed(2) + '%';
+      spamBar.style.width = Math.min(data.spam_probability, 100) + '%';
+      hamBar.style.width = Math.min(data.ham_probability, 100) + '%';
+
+      document.getElementById('detailPrediction').textContent = data.prediction;
+      document.getElementById('detailSpam').textContent = data.spam_probability.toFixed(2) + '%';
+      document.getElementById('detailHam').textContent = data.ham_probability.toFixed(2) + '%';
+
+      riskBadge.textContent = riskLabel(data.risk_level);
+      riskBadge.className = 'risk-badge risk-' + data.risk_level.toLowerCase();
+
+      analyzedText.textContent = data.message;
+
+      renderIndicators(data.indicators);
+    }
+
+    function renderIndicators(indicators) {
+      if (!indicators || !indicators.length) {
+        indicatorsBox.classList.add('hidden');
+        indicatorsBox.innerHTML = '';
+        return;
+      }
+      indicatorsBox.classList.remove('hidden');
+      const heading = '<div class="indicators-title">Detected Text Indicators</div>' +
+        '<p class="muted">Keyword hints found in the message. Educational only - does not affect the prediction.</p>';
+      const items = indicators.map(function (ind) {
+        return '<div class="indicator-item"><span class="indicator-cat">' + escapeHtml(ind.category) + '</span>' +
+          '<span class="indicator-words">' + ind.keywords.map(escapeHtml).join(', ') + '</span></div>';
+      }).join('');
+      indicatorsBox.innerHTML = heading + items;
+    }
+
+    /* ---------- History record ---------- */
+    function pushToHistory(data) {
+      const history = loadHistory();
+      history.unshift({
+        ts: Date.now(),
+        message: data.message,
+        prediction: data.prediction,
+        spam_probability: data.spam_probability,
+        ham_probability: data.ham_probability,
+        confidence: data.confidence,
+        risk_level: data.risk_level
+      });
+      saveHistory(history);
+      renderStats(history);
+      renderHistory(history);
+    }
+
+    /* ---------- Buttons ---------- */
+    clearBtn.addEventListener('click', function () {
+      messageBox.value = '';
+      resultCard.classList.add('hidden');
+      resultCard.className = 'card result-card hidden';
+      messageBox.focus();
+    });
+
+    checkBtn.addEventListener('click', function () {
+      const message = messageBox.value.trim();
+      if (!message) {
+        showError('Please enter a message.');
+        return;
+      }
+
+      checkBtn.disabled = true;
+      checkBtn.textContent = 'Checking...';
+      resultCard.classList.add('hidden');
+
+      const body = new URLSearchParams({ message: message });
+
+      fetch('/predict', { method: 'POST', body: body })
+        .then(function (res) {
+          return res.json().then(function (data) {
+            return { ok: res.ok, data: data };
+          });
+        })
+        .then(function (result) {
+          if (!result.ok) {
+            showError(result.data.error || 'Something went wrong.');
+            return;
+          }
+          renderResult(result.data);
+          pushToHistory(result.data);
+        })
+        .catch(function () {
+          showError('Could not reach the server. Is the app running?');
+        })
+        .finally(function () {
+          checkBtn.disabled = false;
+          checkBtn.textContent = 'Check Message';
+        });
+    });
+
+    document.getElementById('clearHistoryBtn').addEventListener('click', function () {
+      if (!confirm('Are you sure you want to clear all prediction history?')) return;
+      saveHistory([]);
+      renderStats([]);
+      renderHistory([]);
+    });
+
+    /* ---------- Init ---------- */
+    renderStats(loadHistory());
+    renderHistory(loadHistory());
+  </script>
+</body>
+</html>
